@@ -1,0 +1,126 @@
+{
+  "name": "ERP Defect Monitoring",
+  "description": "ERP 검사의뢰를 중심으로 부적합 이력을 탐색하기 위한 Bloom 퍼스펙티브",
+  "version": "1.0.0",
+  "categories": [
+    {
+      "id": "inspectionRequest",
+      "label": "InspectionRequest",
+      "color": "#1f4b8f",
+      "icon": "&#xf044;",
+      "properties": ["reqNo", "status", "requestedAt"]
+    },
+    {
+      "id": "occurrence",
+      "label": "Occurrence",
+      "color": "#ff8c42",
+      "icon": "&#xf0e7;",
+      "properties": ["start", "end", "inspType", "note"]
+    },
+    {
+      "id": "order",
+      "label": "Order",
+      "color": "#2ca02c",
+      "icon": "&#xf0a1;",
+      "properties": ["orderNo", "orderType", "customerCode", "dueDate"]
+    },
+    {
+      "id": "item",
+      "label": "Item",
+      "color": "#17becf",
+      "icon": "&#xf1b2;",
+      "properties": ["itemCode", "name", "spec"]
+    },
+    {
+      "id": "operation",
+      "label": "Operation",
+      "color": "#9467bd",
+      "icon": "&#xf085;",
+      "properties": ["code", "name", "routeNo", "sequence"]
+    },
+    {
+      "id": "resource",
+      "label": "Resource",
+      "color": "#7f7f7f",
+      "icon": "&#xf0ad;",
+      "properties": ["code", "name", "workCenter"]
+    },
+    {
+      "id": "worker",
+      "label": "Worker",
+      "color": "#20b2aa",
+      "icon": "&#xf0c0;",
+      "properties": ["id", "name", "team", "shift"]
+    },
+    {
+      "id": "defectCode",
+      "label": "DefectCode",
+      "color": "#d62728",
+      "icon": "&#xf12a;",
+      "properties": ["code", "name", "severity", "group"]
+    },
+    {
+      "id": "inspType",
+      "label": "InspType",
+      "color": "#ffc000",
+      "icon": "&#xf002;",
+      "properties": ["name", "description"]
+    }
+  ],
+  "relationships": [
+    {"type": "FROM_REQUEST", "color": "#1f4b8f"},
+    {"type": "HAS_DEFECT", "color": "#d62728"},
+    {"type": "HAS_TYPE", "color": "#ffc000"},
+    {"type": "IN_ORDER", "color": "#2ca02c"},
+    {"type": "FOR_ITEM", "color": "#17becf"},
+    {"type": "AT_OPERATION", "color": "#9467bd"},
+    {"type": "ON_RESOURCE", "color": "#7f7f7f"},
+    {"type": "BY_WORKER", "color": "#20b2aa"},
+    {"type": "HAS_OPERATION", "color": "#9467bd"},
+    {"type": "ORDERED_FOR", "color": "#17becf"},
+    {"type": "REQUESTS_ORDER", "color": "#1f4b8f"}
+  ],
+  "searchPhrases": [
+    {
+      "name": "request {reqNo}",
+      "pattern": "request {reqNo}",
+      "cypher": "MATCH (req:InspectionRequest {reqNo: $reqNo})-[:FROM_REQUEST]-(occ) RETURN req, occ",
+      "parameters": [
+        {
+          "name": "reqNo",
+          "type": "String",
+          "example": "REQ20240213001"
+        }
+      ]
+    },
+    {
+      "name": "order {orderNo}",
+      "pattern": "order {orderNo}",
+      "cypher": "MATCH (o:Order {orderNo: $orderNo}) OPTIONAL MATCH (o)<-[:IN_ORDER]-(occ) RETURN o, occ",
+      "parameters": [
+        {
+          "name": "orderNo",
+          "type": "String",
+          "example": "MO20240213015"
+        }
+      ]
+    },
+    {
+      "name": "item {itemCode}",
+      "pattern": "item {itemCode}",
+      "cypher": "MATCH (i:Item {itemCode: $itemCode}) OPTIONAL MATCH (i)<-[:FOR_ITEM]-(occ) RETURN i, occ",
+      "parameters": [
+        {
+          "name": "itemCode",
+          "type": "String",
+          "example": "P-100-200"
+        }
+      ]
+    }
+  ],
+  "expansion": {
+    "depth": 4,
+    "expandOnDoubleClick": true,
+    "limit": 400
+  }
+}
