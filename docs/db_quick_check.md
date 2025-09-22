@@ -1,165 +1,157 @@
 # Neo4j DB Quick Check & Search Snippets
 
-이 문서는 Neo4j 운영 DB 상태를 신속히 점검하고, 주요 식별자/키워드 기반 탐색을 즉시 실행할 수 있는 Cypher 스니펫을 정리합니다. 
-라벨/프로퍼티 명은 현재 ETL 스크립트(`etl/access_to_neo4j.py`)와 데이터 로딩 스크립트 기준으로 작성되었습니다.
+운영 Neo4j 인스턴스에서 즉시 사용할 수 있는 상태 점검·검색 스니펫 모음입니다. 모든 쿼리는 비파괴(idempotent)이며 Neo4j Browser, Bloom, NeoDash 등 어디에서든 붙여 넣어 실행할 수 있습니다.
 
-## 1. 현재 그래프 요약 확인
+## 0. 스키마/데이터 스냅샷 (빠른 상태 확인)
 
 ```cypher
-// 1-1) 라벨별 노드 카운트
+// 라벨별 노드 개수
 CALL db.labels() YIELD label
 CALL {
   WITH label
   CALL apoc.cypher.run('MATCH (n:`'+label+'`) RETURN count(n) AS c', {}) YIELD value
-  RETURN label, value.c AS count
+  RETURN label AS l, value.c AS c
 }
-RETURN * ORDER BY count DESC;
+RETURN label, c ORDER BY c DESC;
 ```
 
 ```cypher
-// 1-2) 주요 속성(컬럼) 분포
-MATCH (n)
-WITH labels(n) AS labs, keys(n) AS ks
-UNWIND ks AS k
-RETURN labs AS labels, k AS property, count(*) AS freq
-ORDER BY freq DESC, property
-LIMIT 200;
-```
-
-```cypher
-// 1-3) 인덱스 & 제약 조건 리스트
+// 인덱스와 제약 조건 목록
 CALL db.indexes();
 CALL db.constraints();
 ```
 
-## 2. 통합 풀텍스트 인덱스 확인/생성
-
-다음 구문은 주요 라벨(`Occurrence`, `Order`, `Item`, `Operation`, `Resource`, `Worker`, `InspectionRequest`, `DefectCode`, `InspType`)의 대표 속성에 대해 통합 검색 인덱스를 생성합니다. 이미 존재하면 아무 작업도 하지 않습니다.
+## 1. ft_all 생성/검증
 
 ```cypher
+// 1-1) 통합 풀텍스트 인덱스 생성 (이미 있으면 패스)
 CREATE FULLTEXT INDEX ft_all IF NOT EXISTS
-FOR (n:Occurrence|Order|Item|Operation|Resource|Worker|InspectionRequest|DefectCode|InspType)
+FOR (n:Occurrence|Order|Item|Operation|Resource|Worker|InspectionRequest|DefectCode)
 ON EACH [
   n.reqNo,
   n.orderNo,
   n.itemCode,
   n.routNo,
+  n.code,
+  n.desc,
   n.opCode,
   n.opName,
   n.resCode,
   n.resName,
   n.worker,
-  n.note,
-  n.code,
-  n.name,
-  n.id,
-  n.altCode,
-  n.desc
+  n.workerName,
+  n.note
 ];
 ```
 
-> 참고: `Occurrence.worker`는 작업자 ID를 저장하며, `Worker` 노드는 `id`/`name` 속성을 사용합니다. `Resource`는 `code`(주 키)와 `altCode`(원본 코드)를 모두 보관합니다.
-
-## 3. 컬럼별 검색 + 연관 노드 자동 확장
-
-아래 쿼리는 `Occurrence` 중심 탐색을 전제로 하며, 1~2홉 이내의 연관 노드/관계를 자동으로 펼쳐 보여줍니다.
-
 ```cypher
-// A. 검사의뢰번호(reqNo) 정확 일치 검색
-WITH $reqNo AS reqNo
-MATCH (o:Occurrence)
-WHERE exists(o.reqNo) AND o.reqNo = reqNo
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN o, p
-ORDER BY o.start DESC
-LIMIT 200;
+// 1-2) 인덱스 구성 확인
+CALL db.indexes() YIELD name, type, entityType, labelsOrTypes, properties, state
+WHERE name = 'ft_all'
+RETURN name, type, entityType, labelsOrTypes, properties, state;
 ```
 
 ```cypher
-// B. 제조오더번호(orderNo) 정확 일치 검색
-WITH $orderNo AS orderNo
-MATCH (o:Occurrence)
-WHERE exists(o.orderNo) AND o.orderNo = orderNo
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN o, p
-ORDER BY o.start DESC
-LIMIT 200;
-```
-
-```cypher
-// C. 품목코드 + 기간 필터 (start/end 문자열은 ISO-8601 형식)
-WITH date($from) AS d1, date($to) AS d2, $item AS item
-MATCH (o:Occurrence)
-WHERE exists(o.itemCode) AND o.itemCode = item
-  AND exists(o.start) AND exists(o.end)
-  AND date(o.start) >= d1 AND date(o.end) <= d2
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN o, p
-ORDER BY o.start
-LIMIT 500;
-```
-
-```cypher
-// D. 작업자/공정코드/자원명 교차 필터 (NULL 허용)
-WITH $worker AS worker, $opCode AS opCode, $resName AS resName
-MATCH (o:Occurrence)
-WHERE (worker IS NULL OR (exists(o.worker) AND o.worker = worker))
-  AND (opCode IS NULL OR (exists(o.opCode) AND o.opCode = opCode))
-  AND (resName IS NULL OR (exists(o.resName) AND o.resName = resName))
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN o, p
-LIMIT 300;
-```
-
-```cypher
-// E. 불량 코드(DefectCode.code) → 발생 건 역추적
-WITH $code AS code
-MATCH (dc:DefectCode)
-WHERE exists(dc.code) AND dc.code = code
-MATCH (dc)<-[:OF_CODE]-(o:Occurrence)
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN dc, o, p
-ORDER BY o.start DESC
-LIMIT 300;
-```
-
-```cypher
-// F. 통합 키워드 검색 (부분 검색)
+// 1-3) 키워드 검색 테스트
 CALL db.index.fulltext.queryNodes('ft_all', $q) YIELD node, score
-WITH node, score
-CALL {
-  WITH node
-  OPTIONAL MATCH p=(node)-[*1..2]-(n)
-  RETURN collect(p) AS paths
-}
-RETURN node, score, paths
+RETURN labels(node) AS labels, node, score
 ORDER BY score DESC
-LIMIT 200;
+LIMIT 10;
 ```
 
-## 4. 파라미터 예시
+> 라벨/속성 명칭은 ETL 스크립트 기준입니다. `worker`는 작업자 ID, `workerName`은 가공된 이름, `resCode`/`resName`은 자원 코드/명칭을 나타냅니다.
 
-```json
-{"reqNo": "RQ220505984"}
-{"orderNo": "PD210300167"}
-{"item": "C007082051D", "from": "2022-05-01", "to": "2022-06-30"}
-{"worker": "최규성", "opCode": "560", "resName": "*DBR1"}
-{"code": "A01003"}
-{"q": "검사대기 OR A01003 OR 최종검사"}
-```
-
-## 5. 검사의뢰번호 + 제조오더 교차 확인
+## 2. 파라미터 샘플 (재사용)
 
 ```cypher
 :param reqNo => 'RQ220505984';
 :param orderNo => 'PD210300167';
-
-MATCH (o:Occurrence)
-WHERE exists(o.reqNo) AND o.reqNo = $reqNo
-  AND exists(o.orderNo) AND o.orderNo = $orderNo
-OPTIONAL MATCH p=(o)-[*1..2]-(n)
-RETURN o, p
-ORDER BY o.start;
+:param itemCode => 'C007082051D';
+:param fromDate => '2022-05-01';
+:param toDate   => '2022-06-30';
+:param worker   => '최규성';
+:param opCode   => '560';
+:param resName  => '*DBR1';
+:param defectCode => 'A01003';
+:param q => '검사대기 OR A01003 OR 최종검사';
 ```
 
-Neo4j Browser/Bloom의 Favorites로 저장해 두면 운영자가 반복적으로 재사용할 수 있습니다.
+## 3. 스모크 테스트 (Occurrence 중심 탐색)
+
+```cypher
+// 3A. ReqNo 묶음이 그래프 상에서 연결 확장되는지
+MATCH (o:Occurrence {reqNo: $reqNo})
+OPTIONAL MATCH p=(o)-[*1..2]-(n)
+RETURN o, p
+ORDER BY o.start DESC
+LIMIT 50;
+```
+
+```cypher
+// 3B. OrderNo로도 동일하게 연결 확장되는지
+MATCH (o:Occurrence {orderNo: $orderNo})
+OPTIONAL MATCH p=(o)-[*1..2]-(n)
+RETURN o, p
+ORDER BY o.start DESC
+LIMIT 50;
+```
+
+```cypher
+// 3C. ItemCode + 기간 필터 동작 여부
+MATCH (o:Occurrence {itemCode: $itemCode})
+WHERE exists(o.start) AND exists(o.end)
+  AND date(o.start) >= date($fromDate) AND date(o.end) <= date($toDate)
+RETURN o
+ORDER BY o.start
+LIMIT 50;
+```
+
+```cypher
+// 3D. 원인코드 역추적
+MATCH (dc:DefectCode {code: $defectCode})<-[:OF_CODE]-(o:Occurrence)
+RETURN dc, o
+ORDER BY o.start DESC
+LIMIT 50;
+```
+
+```cypher
+// 3E. 키워드(부분) 검색 → 연관 노드까지
+CALL db.index.fulltext.queryNodes('ft_all', $q) YIELD node, score
+CALL {
+  WITH node
+  OPTIONAL MATCH p=(node)-[*1..2]-(m)
+  RETURN collect(p) AS paths
+}
+RETURN labels(node) AS labels, node, score, paths
+ORDER BY score DESC
+LIMIT 20;
+```
+
+## 4. 정확성 체크리스트
+
+- 라벨/속성 명칭이 문서와 일치하는지 (`worker` vs `workerName`, `resCode`/`resName`, `opCode`/`opName` 등).
+- 핵심 관계: `(:Occurrence)-[:OF_CODE]->(:DefectCode)`, `(:Occurrence)-[:HAS_TYPE]->(:InspType)`, `(:Occurrence)-[:IN_ORDER]->(:Order)`, `(:Occurrence)-[:FOR_ITEM]->(:Item)`, `(:Occurrence)-[:AT_OPERATION]->(:Operation)`, `(:Occurrence)-[:ON_RESOURCE]->(:Resource)`, `(:Occurrence)-[:BY_WORKER]->(:Worker)`, `(:Occurrence)-[:FROM_REQUEST]->(:InspectionRequest)`가 샘플에서 최소 1건 이상 존재하는지.
+- `ft_all` 질의로 요청번호, 오더번호, 코드, 설명, 작업자, 공정, 자원, 비고가 모두 검색되는지.
+
+## 5. 성능 빠른 점검 (문제 있을 때만)
+
+```cypher
+PROFILE
+CALL db.index.fulltext.queryNodes('ft_all', $q) YIELD node, score
+RETURN node
+LIMIT 5;
+```
+
+> Cardinality가 과도하게 크다면 인덱스 속성 범위를 재검토하거나 `ft_occurrence` 등 보조 인덱스를 병행하는 것을 권장합니다.
+
+## 6. 엣지 케이스
+
+- 날짜 타입이 문자열과 섞여 있다면 `date(o.start)` 변환 시 오류가 발생할 수 있으므로 ISO-8601 문자열(`YYYY-MM-DD`)을 권장합니다.
+- 전각/특수문자가 포함된 텍스트(예: `전체길이－미달`)도 `ft_all`에서 적절히 검색되는지 확인합니다. 필요하면 정규화 필드를 추가하여 인덱스에 포함합니다.
+- 작업자/공정/자원 필터에서 NULL 허용이 필요할 경우 `WHERE (param IS NULL OR ...)` 패턴을 활용합니다.
+
+## 7. 선택 개선 (원클릭 UX)
+
+- Neo4j Bloom 또는 NeoDash 카드로 3A~3E 쿼리를 버튼화하여 제공.
+- 필요한 경우 `CYPHER runtime=pipelined` 힌트를 명시적으로 추가.
+- `ft_all` 외에 `ft_defectcode`, `ft_occurrence` 등 특화 인덱스를 병행 노출하여 탐색 속도를 최적화.

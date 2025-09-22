@@ -10,23 +10,21 @@ FOR (o:Occurrence) ON EACH [o.oid, o.reqNo, o.orderNo, o.itemCode, o.resName, o.
 
 // Consolidated search across major ERP labels
 CREATE FULLTEXT INDEX ft_all IF NOT EXISTS
-FOR (n:Occurrence|Order|Item|Operation|Resource|Worker|InspectionRequest|DefectCode|InspType)
+FOR (n:Occurrence|Order|Item|Operation|Resource|Worker|InspectionRequest|DefectCode)
 ON EACH [
   n.reqNo,
   n.orderNo,
   n.itemCode,
   n.routNo,
+  n.code,
+  n.desc,
   n.opCode,
   n.opName,
   n.resCode,
   n.resName,
   n.worker,
-  n.note,
-  n.code,
-  n.name,
-  n.id,
-  n.altCode,
-  n.desc
+  n.workerName,
+  n.note
 ];
 
 // Simple indexes for lookups (already partially present via constraints)
