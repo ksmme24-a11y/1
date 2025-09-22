@@ -1,0 +1,26 @@
+// ERP 연계용 노드 제약/인덱스
+
+CREATE CONSTRAINT c_occurrence_oid IF NOT EXISTS
+FOR (n:Occurrence) REQUIRE n.oid IS UNIQUE;
+
+CREATE CONSTRAINT c_order IF NOT EXISTS
+FOR (n:Order) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT c_item IF NOT EXISTS
+FOR (n:Item) REQUIRE n.code IS UNIQUE;
+
+CREATE CONSTRAINT c_operation IF NOT EXISTS
+FOR (n:Operation) REQUIRE n.code IS UNIQUE;
+
+CREATE CONSTRAINT c_resource IF NOT EXISTS
+FOR (n:Resource) REQUIRE n.code IS UNIQUE;
+
+CREATE CONSTRAINT c_worker IF NOT EXISTS
+FOR (n:Worker) REQUIRE n.name IS UNIQUE;
+
+CREATE CONSTRAINT c_inspreq IF NOT EXISTS
+FOR (n:InspectionRequest) REQUIRE n.id IS UNIQUE;
+
+CREATE CONSTRAINT c_insptype IF NOT EXISTS
+FOR (n:InspType) REQUIRE n.name IS UNIQUE;
+
